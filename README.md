@@ -1,4 +1,4 @@
-# Ultra Defender for Linux (UDfL) - Wersja 2.0 (Modułowa i Interaktywna)
+# Ultra Defender for Linux (UDfL) - Wersja 1.0.0 (Modułowa i Interaktywna)
 
 **Kompleksowa, modułowa i interaktywna ochrona prywatności i bezpieczeństwa dla systemów Linux. Teraz z hartowaniem jądra i integracją z Fail2Ban.**
 
@@ -6,7 +6,7 @@
 
 ### Spis Treści
 1.  [Czym jest Ultra Defender for Linux?](#czym-jest-ultra-defender-for-linux)
-2.  [Nowości w wersji 2.0](#nowości-w-wersji-20)
+2.  [Nowości w wersji 1.0.0](#nowości-w-wersji-100)
 3.  [Jak to działa?](#jak-to-działa)
 4.  [Wymagania](#wymagania)
 5.  [Instalacja i Konfiguracja (Interaktywna)](#instalacja-i-konfiguracja-interaktywna)
@@ -19,11 +19,11 @@
 
 Ultra Defender for Linux (UDfL) to zaawansowane narzędzie skryptowe Bash zaprojektowane, aby wzmocnić Twoją prywatność i bezpieczeństwo w środowisku Linux. Działa w tle, blokując telemetrię, złośliwe oprogramowanie i mechanizmy śledzące, z minimalnym wpływem na wydajność systemu.
 
-### Nowości w wersji 2.0
+### Nowości w wersji 1.0.0
 
 *   **Modułowa Architektura:** UDfL jest teraz podzielony na niezależne moduły (Hosts, Firewall, Kernel Hardening, Fail2Ban, Telemetry), które możesz włączać i wyłączać niezależnie.
-*   **Interaktywny Instalator:** Domyślnie uruchamia się w trybie interaktywnym, oferując szybką instalację lub niestandardową konfigurację z wyborem modułów i dodawaniem wykluczeń.
-*   **Konfigurator (`udfl-config.sh`):** Nowe narzędzie do zarządzania UDfL po instalacji, pozwalające na włączanie/wyłączanie modułów i dodawanie/usuwanie wykluczeń z poziomu linii komend.
+*   **Interaktywny Instalator/Konfigurator:** Domyślnie uruchamia się w trybie interaktywnym, oferując szybką instalację (wszystko domyślnie) lub niestandardową konfigurację z wyborem modułów i dodawaniem wykluczeń.
+*   **Konfigurator (`udfl-config.sh`):** Nowe, główne narzędzie do zarządzania UDfL po instalacji, pozwalające na włączanie/wyłączanie modułów i dodawanie/usuwanie wykluczeń z poziomu linii komend.
 *   **Hartowanie Jądra Systemu (`sysctl`):** UDfL aktywnie wzmacnia parametry sieciowe jądra Linuksa, aby chronić przed atakami sieciowymi, takimi jak SYN Flood i fałszywymi przekierowaniami ICMP.
 *   **Integracja z `fail2ban`:** Jeśli `fail2ban` jest zainstalowany, UDfL automatycznie skonfiguruje go do ochrony usługi SSH, dynamicznie blokując adresy IP, które próbują odgadnąć hasło.
 
@@ -48,13 +48,13 @@ Przed instalacją upewnij się, że w Twoim systemie zainstalowane są następuj
 *   `grep`, `sed`, `awk`, `mktemp`, `tee` (standardowe narzędzia Linuksa)
 
 Możesz je zainstalować za pomocą menedżera pakietów swojej dystrybucji, np.:
-*   **Debian/Ubuntu:** `sudo apt-get install curl ipset iptables fail2ban sysctl`
-*   **Fedora/CentOS:** `sudo dnf install curl ipset iptables fail2ban sysctl`
+*   **Debian/Ubuntu:** `sudo apt-get install curl ipset iptables fail2ban`
+*   **Fedora/CentOS:** `sudo dnf install curl ipset iptables fail2ban`
 
 ### Instalacja i Konfiguracja (Interaktywna)
 
 1.  **Pobierz i rozpakuj:**
-    *   Pobierz cały folder `instalator` z tego repozytorium na swój system Linux.
+    *   Pobierz folder `instalator` z tego repozytorium na swój system Linux.
     *   Otwórz terminal wewnątrz rozpakowanego folderu `instalator`.
 2.  **Nadaj uprawnienia do wykonania:**
     ```bash
@@ -94,7 +94,7 @@ Po instalacji możesz zarządzać modułami UDfL za pomocą głównego skryptu k
     ```
 *   **Aktualizacja list (używane przez cron):**
     ```bash
-    sudo ./udfl-config.sh -update
+    sudo ./udfl-config.sh update
     ```
 
 ### Plik Wykluczeń (`exclusions.txt`)
