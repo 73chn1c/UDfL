@@ -1,12 +1,12 @@
-# Ultra Defender for Linux (UDfL) - Wersja 1.0.0 (Modułowa i Interaktywna)
+# Ultra Defender for Linux (UDfL) - Wersja 1.0.0
 
-**Kompleksowa, modułowa i interaktywna ochrona prywatności i bezpieczeństwa dla systemów Linux. Teraz z hartowaniem jądra i integracją z Fail2Ban.**
+**Kompleksowa, modułowa i interaktywna ochrona prywatności i bezpieczeństwa dla systemów Linux. Z hartowaniem jądra i integracją z Fail2Ban.**
 
 ---
 
 ### Spis Treści
 1.  [Czym jest Ultra Defender for Linux?](#czym-jest-ultra-defender-for-linux)
-2.  [Nowości w wersji 1.0.0](#nowości-w-wersji-100)
+2.  [Główne Cechy Wersji 1.0.0](#główne-cechy-wersji-100)
 3.  [Jak to działa?](#jak-to-działa)
 4.  [Wymagania](#wymagania)
 5.  [Instalacja i Konfiguracja (Interaktywna)](#instalacja-i-konfiguracja-interaktywna)
@@ -19,12 +19,12 @@
 
 Ultra Defender for Linux (UDfL) to zaawansowane narzędzie skryptowe Bash zaprojektowane, aby wzmocnić Twoją prywatność i bezpieczeństwo w środowisku Linux. Działa w tle, blokując telemetrię, złośliwe oprogramowanie i mechanizmy śledzące, z minimalnym wpływem na wydajność systemu.
 
-### Nowości w wersji 1.0.0
+### Główne Cechy Wersji 1.0.0
 
-*   **Modułowa Architektura:** UDfL jest teraz podzielony na niezależne moduły (Hosts, Firewall, Kernel Hardening, Fail2Ban, Telemetry), które możesz włączać i wyłączać niezależnie.
+*   **Modułowa Architektura:** UDfL jest podzielony na niezależne moduły (Hosts, Firewall, Kernel Hardening, Fail2Ban, Telemetry), które możesz włączać i wyłączać niezależnie.
 *   **Interaktywny Instalator/Konfigurator:** Domyślnie uruchamia się w trybie interaktywnym, oferując szybką instalację (wszystko domyślnie) lub niestandardową konfigurację z wyborem modułów i dodawaniem wykluczeń.
-*   **Konfigurator (`udfl-config.sh`):** Nowe, główne narzędzie do zarządzania UDfL po instalacji, pozwalające na włączanie/wyłączanie modułów i dodawanie/usuwanie wykluczeń z poziomu linii komend.
-*   **Hartowanie Jądra Systemu (`sysctl`):** UDfL aktywnie wzmacnia parametry sieciowe jądra Linuksa, aby chronić przed atakami sieciowymi, takimi jak SYN Flood i fałszywymi przekierowaniami ICMP.
+*   **Konfigurator (`udfl-config.sh`):** Główne narzędzie do zarządzania UDfL po instalacji, pozwalające na włączanie/wyłączanie modułów i dodawanie/usuwanie wykluczeń z poziomu linii komend.
+*   **Hartowanie Jądra Systemu (`sysctl`):** UDfL aktywnie wzmacnia parametry sieciowe jądra Linuksa, aby chronić przed atakami sieciowymi, takimi jak SYN Flood i fałszywe przekierowania ICMP.
 *   **Integracja z `fail2ban`:** Jeśli `fail2ban` jest zainstalowany, UDfL automatycznie skonfiguruje go do ochrony usługi SSH, dynamicznie blokując adresy IP, które próbują odgadnąć hasło.
 
 ### Jak to działa?
