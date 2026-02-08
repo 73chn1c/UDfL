@@ -1,0 +1,566 @@
+#!/bin/bash
+set -e # Zakończ skrypt, jeśli którekolwiek polecenie zwróci błąd
+set -o pipefail # Zakończ potok, jeśli którekolwiek polecenie zwróci błąd
+
+# ==============================================================================
+# Ultra Defender for Linux (UDfL) - Configurator Core Script
+# Wersja 2.0.0 - Modułowy, interaktywny instalator i konfigurator
+#
+# Ten skrypt zarządza instalacją, deinstalacją, aktualizacją i konfiguracją UDfL.
+# Musi być uruchamiany z uprawnieniami roota (sudo).
+# ==============================================================================
+
+# --- === Konfiguracja Globalna === ---
+PROJECT_NAME="Ultra Defender for Linux"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" &> /dev/null && pwd)"
+UDfL_CONFIG_DIR="/etc/udfl" # Katalog na pliki konfiguracyjne UDfL
+STATE_FILE="${UDfL_CONFIG_DIR}/state.conf" # Plik przechowujący stan modułów
+HOSTS_FILE="/etc/hosts"
+EXCLUSIONS_FILE="${UDfL_CONFIG_DIR}/exclusions.txt" # Exclusions.txt przeniesione do katalogu konfiguracyjnego
+LOG_FILE="/var/log/udfl.log"
+BACKUP_DIR="/etc/udfl-backup"
+STEVEN_BLACK_HOSTS_URL="https://raw.githubusercontent.com/StevenBlack/hosts/master/hosts"
+IPSET_NAME="udfl_blocklist"
+IPTABLES_CHAIN="UDfL_BLOCK"
+
+# --- === Logowanie === ---
+log() {
+    local message="$1"
+    echo "$(date '+%Y-%m-%d %H:%M:%S') - ${message}" | tee -a "${LOG_FILE}"
+}
+
+# --- === Sprawdzenie Zależności i Uprawnień === ---
+check_dependencies() {
+    log "Sprawdzanie zależności..."
+    local dependencies=("curl" "wget" "ipset" "iptables" "grep" "sed" "awk" "mktemp" "tee" "sysctl" "systemctl")
+    local missing_deps=()
+    for dep in "${dependencies[@]}"; do
+        if ! command -v "${dep}" &> /dev/null; then
+            missing_deps+=("${dep}")
+        fi
+    done
+
+    if ! (command -v curl &> /dev/null || command -v wget &> /dev/null); then
+         missing_deps+=("curl lub wget")
+    fi
+
+    if [ ${#missing_deps[@]} -gt 0 ]; then
+        log "BŁĄD: Brakujące zależności: ${missing_deps[*]}. Proszę je zainstalować."
+        exit 1
+    fi
+
+    if [ "$(id -u)" -ne 0 ]; then
+        log "BŁĄD: Ten skrypt musi być uruchomiony z uprawnieniami roota (sudo)."
+        exit 1
+    fi
+}
+
+# --- === Zarządzanie Stanem Modułów === ---
+init_state_file() {
+    mkdir -p "${UDfL_CONFIG_DIR}"
+    if [ ! -f "${STATE_FILE}" ]; then
+        touch "${STATE_FILE}"
+        set_module_state "hosts" "disabled"
+        set_module_state "firewall" "disabled"
+        set_module_state "kernel" "disabled"
+        set_module_state "fail2ban" "disabled"
+        set_module_state "telemetry" "disabled"
+        log "Zainicjowano plik stanu modułów."
+    fi
+    if [ ! -f "${EXCLUSIONS_FILE}" ]; then
+        echo "# Dodaj domeny lub adresy IP do wykluczeń (jedna na linię)." > "${EXCLUSIONS_FILE}"
+        echo "# Linie zaczynające się od # są ignorowane." >> "${EXCLUSIONS_FILE}"
+    fi
+}
+
+get_module_state() {
+    local module="$1"
+    grep "^${module}_STATE=" "${STATE_FILE}" | cut -d'=' -f2 || echo "disabled"
+}
+
+set_module_state() {
+    local module="$1"
+    local state="$2"
+    if grep -q "^${module}_STATE=" "${STATE_FILE}"; then
+        sed -i "/^${module}_STATE=/c\${module}_STATE=${state}" "${STATE_FILE}"
+    else
+        echo "${module}_STATE=${state}" >> "${STATE_FILE}"
+    fi
+}
+
+# --- === Wykrywanie Narzędzi Sieciowych === ---
+detect_downloader() {
+    if command -v curl &> /dev/null; then
+        DOWNLOADER="curl"
+    else
+        DOWNLOADER="wget"
+    fi
+}
+
+download_file() {
+    local url="$1"
+    local output_path="$2"
+    log "Pobieranie pliku z ${url}..."
+    if [ "$DOWNLOADER" == "curl" ]; then
+        curl -s -L "${url}" -o "${output_path}"
+    else
+        wget -q -O "${output_path}" "${url}"
+    fi
+    if [ $? -ne 0 ]; then
+        log "BŁĄD: Nie udało się pobrać pliku z ${url}."
+        return 1
+    fi
+    return 0
+}
+
+# --- === Zarządzanie Plikiem Hosts === ---
+manage_hosts() {
+    log "Rozpoczynam zarządzanie plikiem ${HOSTS_FILE}..."
+    mkdir -p "${BACKUP_DIR}" || { log "BŁĄD: Nie można utworzyć katalogu kopii zapasowych."; return 1; }
+
+    if [ ! -f "${BACKUP_DIR}/hosts.original" ]; then
+        cp "${HOSTS_FILE}" "${BACKUP_DIR}/hosts.original" || { log "BŁĄD: Nie można utworzyć kopii zapasowej oryginalnego pliku hosts."; return 1; }
+        log "Utworzono oryginalną kopię zapasową pliku hosts w ${BACKUP_DIR}/hosts.original"
+    fi
+    
+    local temp_hosts=$(mktemp)
+    if ! download_file "${STEVEN_BLACK_HOSTS_URL}" "${temp_hosts}"; then
+        rm -f "${temp_hosts}"; return 1;
+    fi
+    
+    local new_hosts_content=$(mktemp)
+    grep -Ev '(^# Ultra Defender for Linux|^0\.0\.0\.0.*# UDfL_BLOCK)' "${BACKUP_DIR}/hosts.original" > "${new_hosts_content}"
+    echo "" >> "${new_hosts_content}"
+    
+    echo "# ======================================================================" >> "${new_hosts_content}"
+    echo "# Ultra Defender for Linux - Generated by UDfL on $(date)" >> "${new_hosts_content}"
+    echo "# ======================================================================" >> "${new_hosts_content}"
+    
+    local temp_exclusions_filtered=$(mktemp)
+    if [ -f "${EXCLUSIONS_FILE}" ]; then
+        grep -v '^#' "${EXCLUSIONS_FILE}" | sed 's/$//' | grep -v '^[[:space:]]*$' > "${temp_exclusions_filtered}"
+    fi
+
+    awk '/^0\.0\.0\.0/ {print $2}' "${temp_hosts}" | grep -v -F -f "${temp_exclusions_filtered}" | sed 's/$//' | while read -r domain; do
+        echo "0.0.0.0 ${domain} # UDfL_BLOCK" >> "${new_hosts_content}"
+    done
+    
+    cat "${new_hosts_content}" > "${HOSTS_FILE}" || { log "BŁĄD: Nie można nadpisać pliku hosts."; return 1; }
+    log "Plik ${HOSTS_FILE} został pomyślnie zaktualizowany."
+    
+    rm -f "${temp_hosts}" "${new_hosts_content}" "${temp_exclusions_filtered}"
+    set_module_state "hosts" "enabled"
+    return 0
+}
+
+disable_hosts() {
+    log "Wyłączanie modułu Hosts..."
+    if [ -f "${BACKUP_DIR}/hosts.original" ]; then
+        cp "${BACKUP_DIR}/hosts.original" "${HOSTS_FILE}" || { log "BŁĄD: Nie można przywrócić oryginalnego pliku hosts."; return 1; }
+        log "Plik hosts został przywrócony do stanu oryginalnego."
+    else
+        log "OSTRZEŻENIE: Nie znaleziono oryginalnej kopii zapasowej hosts. Próbuję usunąć tylko wpisy UDfL..."
+        sed -i.bak '/# UDfL_BLOCK/d' "${HOSTS_FILE}"
+        log "Usunięto wpisy UDfL z pliku hosts."
+    fi
+    set_module_state "hosts" "disabled"
+    return 0
+}
+
+# --- === Zarządzanie Zaporą Sieciową === ---
+manage_firewall() {
+    log "Rozpoczynam konfigurację zapory sieciowej..."
+    clean_firewall_rules # Czyści reguły UDfL przed dodaniem nowych
+
+    if command -v ufw &> /dev/null && ufw status | grep -q "active"; then
+        log "OSTRZEŻENIE: Wykryto aktywną zaporę UFW. UDfL nie modyfikuje bezpośrednio reguł UFW, aby uniknąć konfliktów."
+        log "Jeśli chcesz, aby UDfL zarządzał zaporą, najpierw wyłącz UFW (sudo ufw disable), a następnie uruchom ponownie instalator UDfL."
+        set_module_state "firewall" "disabled"
+        return 0 # Zakończ funkcję bez błędu
+    fi
+    
+    if command -v firewall-cmd &> /dev/null && firewall-cmd --state &> /dev/null; then
+        log "Wykryto aktywną zaporę Firewalld. Konfiguruję..."
+        
+        if ! firewall-cmd --permanent --get-ipset-types | grep -q "${IPSET_NAME}"; then
+            firewall-cmd --permanent --new-ipset="${IPSET_NAME}" --type=hash:net
+        fi
+        
+        local temp_blocklist=$(mktemp)
+        if download_file "https://www.spamhaus.org/drop/drop.txt" "${temp_blocklist}"; then
+            # Usuń stare wpisy z ipset, zanim dodasz nowe
+            firewall-cmd --permanent --ipset="${IPSET_NAME}" --remove-entries-from-file="${temp_blocklist}" &> /dev/null || true
+            firewall-cmd --permanent --ipset="${IPSET_NAME}" --add-entries-from-file="${temp_blocklist}"
+            log "Dodano adresy IP z listy Spamhaus DROP do ipset ${IPSET_NAME} w Firewalld."
+        fi
+        rm -f "${temp_blocklist}"
+        
+        if ! firewall-cmd --permanent --query-rich-rule="rule family='ipv4' destination-ipset='${IPSET_NAME}' drop" &> /dev/null; then
+            firewall-cmd --permanent --zone=public --add-rich-rule="rule family='ipv4' destination-ipset='${IPSET_NAME}' drop"
+        fi
+        
+        firewall-cmd --reload
+        log "Reguły Firewalld zostały zastosowane."
+        set_module_state "firewall" "enabled"
+        return 0
+    fi
+
+    log "Używam domyślnej konfiguracji ipset i iptables."
+    
+    ipset create "${IPSET_NAME}" hash:net family inet || log "OSTRZEŻENIE: Nie można stworzyć ipset ${IPSET_NAME} (może już istnieje)."
+    
+    local temp_blocklist_iptables=$(mktemp)
+    if download_file "https://www.spamhaus.org/drop/drop.txt" "${temp_blocklist_iptables}"; then
+        awk -F';' '/^[^;]/ {print $1}' "${temp_blocklist_iptables}" | sed 's/ //g' | while read -r ip; do
+            ipset add "${IPSET_NAME}" "${ip}" &> /dev/null || true
+        done
+        log "Dodano adresy IP z listy Spamhaus DROP do ipset ${IPSET_NAME}."
+    fi
+    rm -f "${temp_blocklist_iptables}"
+    
+    if ! iptables -n -L "${IPTABLES_CHAIN}" &> /dev/null; then
+        iptables -N "${IPTABLES_CHAIN}"
+        iptables -A "${IPTABLES_CHAIN}" -m set --match-set "${IPSET_NAME}" dst -j DROP
+        iptables -I OUTPUT 1 -j "${IPTABLES_CHAIN}"
+        log "Dodano łańcuch iptables ${IPTABLES_CHAIN} i regułę blokującą."
+    fi
+    set_module_state "firewall" "enabled"
+    return 0
+}
+
+disable_firewall() {
+    log "Wyłączanie modułu Zapory sieciowej..."
+    clean_firewall_rules
+    set_module_state "firewall" "disabled"
+    return 0
+}
+
+clean_firewall_rules() {
+    log "Czyszczenie starych reguł zapory UDfL..."
+
+    if command -v iptables &> /dev/null; then
+        if iptables -C OUTPUT -j "${IPTABLES_CHAIN}" &> /dev/null; then
+            iptables -D OUTPUT -j "${IPTABLES_CHAIN}"
+        fi
+        if iptables -n -L "${IPTABLES_CHAIN}" &> /dev/null; then
+            iptables -F "${IPTABLES_CHAIN}"
+            iptables -X "${IPTABLES_CHAIN}"
+        fi
+    fi
+
+    if command -v ipset &> /dev/null; then
+        ipset destroy "${IPSET_NAME}" &> /dev/null || true
+    fi
+
+    if command -v firewall-cmd &> /dev/null; then
+        if firewall-cmd --permanent --query-rich-rule="rule family='ipv4' destination-ipset='${IPSET_NAME}' drop" &> /dev/null; then
+            firewall-cmd --permanent --zone=public --remove-rich-rule="rule family='ipv4' destination-ipset='${IPSET_NAME}' drop"
+        fi
+        if firewall-cmd --permanent --get-ipset-types | grep -q "${IPSET_NAME}"; then
+            firewall-cmd --permanent --remove-ipset="${IPSET_NAME}"
+        fi
+        firewall-cmd --reload
+    fi
+    return 0
+}
+
+# --- === Hartowanie Jądra (sysctl) === ---
+harden_kernel() {
+    log "Rozpoczynam hartowanie parametrów jądra (sysctl)..."
+    local sysctl_conf="${UDfL_CONFIG_DIR}/99-udfl-sysctl.conf"
+    
+    cat > "${sysctl_conf}" << EOL
+# Konfiguracja bezpieczeństwa sieciowego przez Ultra Defender for Linux
+# Ochrona przed atakami SYN flood
+net.ipv4.tcp_syncookies = 1
+# Ignoruj pakiety ICMP redirect
+net.ipv4.conf.all.accept_redirects = 0
+net.ipv4.conf.default.accept_redirects = 0
+# Ignoruj pakiety źródłowe (source-routed)
+net.ipv4.conf.all.accept_source_route = 0
+net.ipv4.conf.default.accept_source_route = 0
+# Włącz pełną randomizację przestrzeni adresowej (ASLR)
+kernel.randomize_va_space = 2
+EOL
+
+    sysctl -p "${sysctl_conf}" || { log "BŁĄD: Nie można zastosować ustawień sysctl."; return 1; }
+    log "Zastosowano bezpieczne ustawienia jądra."
+    set_module_state "kernel" "enabled"
+    return 0
+}
+
+disable_kernel_hardening() {
+    log "Wyłączanie modułu Hartowania Jądra..."
+    local sysctl_conf="${UDfL_CONFIG_DIR}/99-udfl-sysctl.conf"
+    if [ -f "${sysctl_conf}" ]; then
+        rm "${sysctl_conf}"
+        sysctl --system # Przeładuj wszystkie konfiguracje sysctl
+        log "Usunięto konfigurację sysctl UDfL."
+    else
+        log "Konfiguracja sysctl UDfL nie znaleziona. Pomijam."
+    fi
+    set_module_state "kernel" "disabled"
+    return 0
+}
+
+# --- === Integracja z Fail2Ban === ---
+setup_fail2ban() {
+    if ! command -v fail2ban-client &> /dev/null; then
+        log "OSTRZEŻENIE: Narzędzie 'fail2ban' nie jest zainstalowane. Pomijam ten krok."
+        log "Aby włączyć dynamiczną ochronę, zainstaluj fail2ban (np. sudo apt install fail2ban) i uruchom konfigurator ponownie."
+        set_module_state "fail2ban" "disabled"
+        return 0
+    fi
+
+    log "Konfiguruję ochronę SSH za pomocą Fail2Ban..."
+    local fail2ban_conf="${UDfL_CONFIG_DIR}/jail.d/udfl-ssh.conf"
+    
+    mkdir -p "$(dirname "${fail2ban_conf}")"
+    cat > "${fail2ban_conf}" << EOL
+# Konfiguracja ochrony SSH przez Ultra Defender for Linux
+[sshd]
+enabled = true
+port = ssh
+maxretry = 3
+bantime = 1d
+EOL
+
+    fail2ban-client reload || { log "BŁĄD: Nie udało się przeładować konfiguracji Fail2Ban."; return 1; }
+    log "Aktywowano ochronę SSH w Fail2Ban."
+    set_module_state "fail2ban" "enabled"
+    return 0
+}
+
+disable_fail2ban() {
+    log "Wyłączanie modułu Fail2Ban..."
+    local fail2ban_conf="${UDfL_CONFIG_DIR}/jail.d/udfl-ssh.conf"
+    if [ -f "${fail2ban_conf}" ]; then
+        rm "${fail2ban_conf}"
+        if command -v fail2ban-client &> /dev/null; then
+            fail2ban-client reload || { log "OSTRZEŻENIE: Nie udało się przeładować Fail2Ban po usunięciu konfiguracji."; }
+        fi
+        log "Usunięto konfigurację Fail2Ban UDfL."
+    else
+        log "Konfiguracja Fail2Ban UDfL nie znaleziona. Pomijam."
+    fi
+    set_module_state "fail2ban" "disabled"
+    return 0
+}
+
+# --- === Hartowanie Usług Telemetrycznych === ---
+harden_telemetry_services() {
+    log "Rozpoczynam hartowanie usług telemetrycznych..."
+    local services_to_disable=("whoopsie" "apport")
+    for service in "${services_to_disable[@]}"; do
+        if systemctl list-units --full -all | grep -q "${service}.service"; then
+            log "Wyłączanie usługi ${service}..."
+            systemctl disable --now "${service}" &> /dev/null || log "OSTRZEŻENIE: Nie udało się wyłączyć usługi ${service}."
+        fi
+    done
+    set_module_state "telemetry" "enabled"
+    return 0
+}
+
+disable_telemetry_services() {
+    log "Przywracanie usług telemetrycznych..."
+    local services_to_enable=("whoopsie" "apport")
+    for service in "${services_to_enable[@]}"; do
+        if systemctl list-units --full -all | grep -q "${service}.service" && ! systemctl is-enabled "${service}" &> /dev/null; then
+            log "Włączanie i uruchamianie usługi ${service}..."
+            systemctl enable --now "${service}" &> /dev/null || log "OSTRZEŻENIE: Nie udało się włączyć i uruchomić usługi ${service}."
+        fi
+    done
+    set_module_state "telemetry" "disabled"
+    return 0
+}
+
+# --- === Logika Instalacji / Deinstalacji --- ===
+
+install_udfl_core() {
+    log "=== Rozpoczynam instalację/aktualizację ${PROJECT_NAME} ==="
+    local hosts_state=$(get_module_state "hosts")
+    local firewall_state=$(get_module_state "firewall")
+    local kernel_state=$(get_module_state "kernel")
+    local fail2ban_state=$(get_module_state "fail2ban")
+    local telemetry_state=$(get_module_state "telemetry")
+
+    if [ "${hosts_state}" == "enabled" ]; then manage_hosts; else disable_hosts; fi
+    if [ "${firewall_state}" == "enabled" ]; then manage_firewall; else disable_firewall; fi
+    if [ "${kernel_state}" == "enabled" ]; then harden_kernel; else disable_kernel_hardening; fi
+    if [ "${fail2ban_state}" == "enabled" ]; then setup_fail2ban; else disable_fail2ban; fi
+    if [ "${telemetry_state}" == "enabled" ]; then harden_telemetry_services; else disable_telemetry_services; fi
+
+    log "=== Instalacja/Aktualizacja zakończona pomyślnie ==="
+    return 0
+}
+
+uninstall_udfl_core() {
+    log "=== Rozpoczynam deinstalację ${PROJECT_NAME} ==="
+    
+    disable_hosts
+    disable_firewall
+    disable_kernel_hardening
+    disable_fail2ban
+    disable_telemetry_services
+
+    # Sprzątanie katalogu kopii zapasowych
+    if [ -d "${BACKUP_DIR}" ]; then
+        rm -rf "${BACKUP_DIR}"
+        log "Usunięto katalog kopii zapasowych ${BACKUP_DIR}."
+    fi
+    # Usuń główny katalog konfiguracyjny UDfL
+    if [ -d "${UDfL_CONFIG_DIR}" ]; then
+        rm -rf "${UDfL_CONFIG_DIR}"
+        log "Usunięto katalog konfiguracyjny UDfL ${UDfL_CONFIG_DIR}."
+    fi
+    
+    log "=== Deinstalacja zakończona ==="
+    return 0
+}
+
+# --- === Interaktywne Menu === ---
+show_main_menu() {
+    local choice
+    while true; do
+        clear
+        echo "========================================="
+        echo " ULTIMATE DEFENDER for LINUX - Konfigurator"
+        echo "========================================="
+        echo "1. Szybka instalacja (wszystko domyślnie)"
+        echo "2. Niestandardowa konfiguracja"
+        echo "3. Sprawdź status modułów"
+        echo "4. Deinstalacja UDfL"
+        echo "0. Wyjdź"
+        echo "========================================="
+        read -p "Wybierz opcję: " choice
+
+        case "$choice" in
+            1) install_default_modules; break ;;
+            2) configure_custom_modules; break ;;
+            3) show_module_status ;;
+            4) uninstall_udfl_core; break ;;
+            0) log "Wyjście z konfiguratora."; break ;;
+            *) echo "Nieprawidłowy wybór. Spróbuj ponownie." ;;
+        esac
+        log "Naciśnij Enter, aby kontynuować..."
+        read -r
+    done
+}
+
+install_default_modules() {
+    log "Rozpoczynam szybką instalację (domyślne ustawienia)..."
+    set_module_state "hosts" "enabled"
+    set_module_state "firewall" "enabled"
+    set_module_state "kernel" "enabled"
+    set_module_state "fail2ban" "enabled"
+    set_module_state "telemetry" "enabled"
+    install_udfl_core
+    log "Szybka instalacja zakończona."
+}
+
+configure_custom_modules() {
+    log "Rozpoczynam niestandardową konfigurację..."
+    local modules=("hosts" "firewall" "kernel" "fail2ban" "telemetry")
+    local default_enable="enabled"
+
+    for module in "${modules[@]}"; do
+        local current_state=$(get_module_state "${module}")
+        local choice
+        read -p "Włączyć moduł ${module} (obecnie ${current_state})? [T/n/s (pomiń)]: " choice
+        choice=$(echo "${choice}" | tr '[:upper:]' '[:lower:]')
+        case "$choice" in
+            t|tak) set_module_state "${module}" "enabled" ;;
+            n|nie) set_module_state "${module}" "disabled" ;;
+            s|pomiń) ;;
+            *) set_module_state "${module}" "${default_enable}" ;;
+        esac
+    done
+
+    # Wykluczenia
+    local add_exclusions_now
+    read -p "Czy chcesz dodać wykluczenia (domeny/IP) teraz? [T/n]: " add_exclusions_now
+    add_exclusions_now=$(echo "${add_exclusions_now}" | tr '[:upper:]' '[:lower:]')
+    if [ "$add_exclusions_now" == "t" ] || [ "$add_exclusions_now" == "tak" ]; then
+        log "Wpisz domeny/IP do wykluczeń, każda w nowej linii. Zakończ wpisując 'koniec' lub pustą linię."
+        local exclusion
+        while read -p "> " exclusion && [ -n "$exclusion" ] && [ "$exclusion" != "koniec" ]; do
+            echo "$exclusion" >> "${EXCLUSIONS_FILE}"
+            log "Dodano wykluczenie: $exclusion"
+        done
+    fi
+
+    install_udfl_core
+    log "Niestandardowa konfiguracja zakończona."
+}
+
+show_module_status() {
+    clear
+    echo "========================================="
+    echo " STATUS MODUŁÓW ULTRA DEFENDER for LINUX"
+    echo "========================================="
+    local modules=("hosts" "firewall" "kernel" "fail2ban" "telemetry")
+    for module in "${modules[@]}"; do
+        echo "${module}: $(get_module_state "${module}")"
+    done
+    echo "========================================="
+}
+
+# --- === Główna Logika Skryptu === ---
+main() {
+    check_dependencies
+    detect_downloader
+    init_state_file # Zainicjuj plik stanu na początku
+
+    # Uruchomienie trybu interaktywnego, jeśli nie podano specyficznej komendy
+    if [ -z "$1" ]; then
+        show_main_menu
+    else
+        case "$1" in
+            -install)
+                install_udfl_core
+                ;;
+            -uninstall)
+                uninstall_udfl_core
+                ;;
+            status)
+                show_module_status
+                ;;
+            enable)
+                if [ -z "$2" ]; then echo "Użycie: sudo $0 enable <moduł>"; exit 1; fi
+                set_module_state "$2" "enabled"
+                install_udfl_core # Zastosuj zmiany
+                ;;
+            disable)
+                if [ -z "$2" ]; then echo "Użycie: sudo $0 disable <moduł>"; exit 1; ; fi
+                set_module_state "$2" "disabled"
+                install_udfl_core # Zastosuj zmiany
+                ;;
+            add-exclusion)
+                if [ -z "$2" ]; then echo "Użycie: sudo $0 add-exclusion <domena/IP>"; exit 1; fi
+                echo "$2" >> "${EXCLUSIONS_FILE}"
+                log "Dodano wykluczenie: $2"
+                install_udfl_core # Zastosuj zmiany
+                ;;
+            remove-exclusion)
+                if [ -z "$2" ]; then echo "Użycie: sudo $0 remove-exclusion <domena/IP>"; exit 1; fi
+                sed -i.bak "/^$2$/d" "${EXCLUSIONS_FILE}" # .bak tworzy kopię zapasową
+                log "Usunięto wykluczenie: $2"
+                install_udfl_core # Zastosuj zmiany
+                ;;
+            -update) # Używane przez cron
+                log "Rozpoczynam aktualizację modułów."
+                install_udfl_core
+                log "Aktualizacja modułów zakończona."
+                ;;
+            *)
+                echo "Nieznana komenda: $1"
+                echo "Użycie: sudo bash $0 [komenda]"
+                echo "Dostępne komendy: -install, -uninstall, status, enable <moduł>, disable <moduł>, add-exclusion <domena/IP>, remove-exclusion <domena/IP>"
+                exit 1
+                ;;
+        esac
+    fi
+}
+
+# Uruchomienie głównej funkcji
+main "$@"

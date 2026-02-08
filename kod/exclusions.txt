@@ -1,0 +1,7 @@
+# W tym pliku możesz dodać domeny lub adresy IP, które mają być wykluczone z blokad.
+# Każdy wpis umieść w nowej linii.
+# Linie zaczynające się od # są traktowane jako komentarze.
+#
+# Przykład:
+# example.com
+# 1.2.3.4
