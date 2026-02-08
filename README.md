@@ -1,17 +1,18 @@
-# Ultra Defender for Linux (UDfL) - Wersja 1.0.0
+# Ultra Defender for Linux (UDfL) - Wersja 1.1.0
 
-**Kompleksowa, modułowa i interaktywna ochrona prywatności i bezpieczeństwa dla systemów Linux. Z hartowaniem jądra i integracją z Fail2Ban.**
+**Kompleksowa, modułowa i interaktywna ochrona prywatności i bezpieczeństwa dla systemów Linux, teraz z walidacją danych, trybem audit i zaawansowanym zarządzaniem.**
 
 ---
 
 ### Spis Treści
 1.  [Czym jest Ultra Defender for Linux?](#czym-jest-ultra-defender-for-linux)
-2.  [Główne Cechy Wersji 1.0.0](#główne-cechy-wersji-100)
+2.  [Główne Cechy Wersji 1.1.0](#główne-cechy-wersji-110)
 3.  [Jak to działa?](#jak-to-działa)
 4.  [Wymagania](#wymagania)
 5.  [Instalacja i Konfiguracja (Interaktywna)](#instalacja-i-konfiguracja-interaktywna)
 6.  [Zarządzanie UDfL (Konfigurator)](#zarządzanie-udfl-konfigurator)
 7.  [Plik Wykluczeń (`exclusions.txt`)](#plik-wykluczeń-exclusionstxt)
+8.  [Zaawansowana Konfiguracja](#zaawansowana-konfiguracja)
 
 ---
 
@@ -19,96 +20,49 @@
 
 Ultra Defender for Linux (UDfL) to zaawansowane narzędzie skryptowe Bash zaprojektowane, aby wzmocnić Twoją prywatność i bezpieczeństwo w środowisku Linux. Działa w tle, blokując telemetrię, złośliwe oprogramowanie i mechanizmy śledzące, z minimalnym wpływem na wydajność systemu.
 
-### Główne Cechy Wersji 1.0.0
+### Główne Cechy Wersji 1.1.0
 
-*   **Modułowa Architektura:** UDfL jest podzielony na niezależne moduły (Hosts, Firewall, Kernel Hardening, Fail2Ban, Telemetry), które możesz włączać i wyłączać niezależnie.
-*   **Interaktywny Instalator/Konfigurator:** Domyślnie uruchamia się w trybie interaktywnym, oferując szybką instalację (wszystko domyślnie) lub niestandardową konfigurację z wyborem modułów i dodawaniem wykluczeń.
-*   **Konfigurator (`udfl-config.sh`):** Główne narzędzie do zarządzania UDfL po instalacji, pozwalające na włączanie/wyłączanie modułów i dodawanie/usuwanie wykluczeń z poziomu linii komend.
-*   **Hartowanie Jądra Systemu (`sysctl`):** UDfL aktywnie wzmacnia parametry sieciowe jądra Linuksa, aby chronić przed atakami sieciowymi, takimi jak SYN Flood i fałszywe przekierowania ICMP.
-*   **Integracja z `fail2ban`:** Jeśli `fail2ban` jest zainstalowany, UDfL automatycznie skonfiguruje go do ochrony usługi SSH, dynamicznie blokując adresy IP, które próbują odgadnąć hasło.
+*   **Tryb Audit (`--audit`):** Umożliwia symulację instalacji i sprawdzenie, jakie zmiany zostałyby wprowadzone, bez faktycznego modyfikowania systemu.
+*   **Walidacja Danych:** Sprawdza poprawność domen i adresów IP dodawanych do listy wykluczeń.
+*   **Zaawansowane Zarządzanie:** Pozwala na dodawanie i usuwanie wykluczeń bezpośrednio z linii komend.
+*   **Konfiguracja w Pliku:** Umożliwia zaawansowanym użytkownikom zmianę źródeł list blokad w pliku konfiguracyjnym.
+*   **Modułowa Architektura, Interaktywny Instalator, Hartowanie Jądra i Integracja z `fail2ban`** (jak w poprzedniej wersji).
 
 ### Jak to działa?
 
 UDfL stosuje wielowarstwowe podejście do ochrony:
 
--   **Zarządzanie Plikiem `/etc/hosts`:** Blokuje dostęp do tysięcy znanych domen związanych z reklamami, malware i telemetrią.
--   **Inteligentna Konfiguracja Zapory:** Automatycznie wykrywa i konfiguruje Twoją zaporę (`firewalld` lub `ipset`/`iptables`), aby blokować ruch do i z adresów IP o złej reputacji. **Uwaga:** Jeśli używasz `ufw`, UDfL nie zmodyfikuje go, aby uniknąć konfliktów i wymaga jego ręcznego wyłączenia, jeśli chcesz, aby UDfL zarządzał zaporą.
--   **Hartowanie Jądra i Usług:** Wzmacnia jądro systemu i wyłącza znane usługi telemetryczne (np. `whoopsie` w Ubuntu).
--   **Dynamiczna Ochrona (Fail2Ban):** Proaktywnie blokuje ataki brute-force na usługi takie jak SSH.
+-   **Zarządzanie Plikiem `/etc/hosts`:** Blokuje dostęp do tysięcy znanych domen.
+-   **Inteligentna Konfiguracja Zapory:** Automatycznie wykrywa i konfiguruje `firewalld` lub `ipset`/`iptables`.
+-   **Hartowanie Jądra i Usług:** Wzmacnia jądro systemu i wyłącza usługi telemetryczne.
+-   **Dynamiczna Ochrona (Fail2Ban):** Proaktywnie blokuje ataki brute-force na SSH.
 
 ### Wymagania
 
-Przed instalacją upewnij się, że w Twoim systemie zainstalowane są następujące pakiety. Skrypt UDfL automatycznie sprawdzi ich obecność.
-*   `curl` lub `wget`
-*   `ipset`
-*   `iptables`
-*   `fail2ban` (opcjonalne, ale zalecane dla pełnej ochrony)
-*   `sysctl`
-*   `systemctl` (do zarządzania usługami)
-*   `grep`, `sed`, `awk`, `mktemp`, `tee` (standardowe narzędzia Linuksa)
-
-Możesz je zainstalować za pomocą menedżera pakietów swojej dystrybucji, np.:
-*   **Debian/Ubuntu:** `sudo apt-get install curl ipset iptables fail2ban`
-*   **Fedora/CentOS:** `sudo dnf install curl ipset iptables fail2ban`
+Przed instalacją upewnij się, że w Twoim systemie zainstalowane są następujące pakiety:
+*   `curl` lub `wget`, `ipset`, `iptables`, `fail2ban` (opcjonalne), `sysctl`, `systemctl`, `grep`, `sed`, `awk`, `mktemp`, `tee`.
 
 ### Instalacja i Konfiguracja (Interaktywna)
 
-1.  **Pobierz i rozpakuj:**
-    *   Pobierz folder `instalator` z tego repozytorium na swój system Linux.
-    *   Otwórz terminal wewnątrz rozpakowanego folderu `instalator`.
-2.  **Nadaj uprawnienia do wykonania:**
-    ```bash
-    chmod +x install.sh
-    chmod +x udfl-config.sh
-    ```
-3.  **Uruchom instalator:**
-    ```bash
-    ./install.sh
-    ```
-    Skrypt poprosi o hasło `sudo`. Instalator rozpocznie się w trybie interaktywnym, oferując Ci wybór:
-    *   **Szybka instalacja:** Zainstaluje wszystkie zalecane moduły z domyślnymi ustawieniami.
-    *   **Niestandardowa konfiguracja:** Pozwoli Ci wybrać, które moduły chcesz zainstalować i ewentualnie dodać wykluczenia.
+1.  Pobierz folder `instalator` i otwórz w nim terminal.
+2.  Nadaj uprawnienia: `chmod +x install.sh && chmod +x udfl-config.sh`
+3.  Uruchom instalator: `./install.sh`
+    Instalator uruchomi się w trybie interaktywnym, oferując **Szybką instalację** lub **Niestandardową konfigurację**.
 
 ### Zarządzanie UDfL (Konfigurator)
 
-Po instalacji możesz zarządzać modułami UDfL za pomocą głównego skryptu konfiguracyjnego `udfl-config.sh`.
-**Uruchamiaj zawsze z `sudo`!**
+Po instalacji możesz zarządzać modułami UDfL za pomocą `udfl-config.sh`. **Uruchamiaj zawsze z `sudo`!**
 
-*   **Sprawdzenie statusu modułów:**
-    ```bash
-    sudo ./udfl-config.sh status
-    ```
-*   **Włączanie/wyłączanie modułów:**
-    ```bash
-    sudo ./udfl-config.sh enable <nazwa_modułu> # np. hosts, firewall, kernel, fail2ban, telemetry
-    sudo ./udfl-config.sh disable <nazwa_modułu>
-    ```
-*   **Dodawanie/usuwanie wykluczeń:**
-    ```bash
-    sudo ./udfl-config.sh add-exclusion <domena_lub_IP>
-    sudo ./udfl-config.sh remove-exclusion <domena_lub_IP>
-    ```
-*   **Pełna deinstalacja UDfL:**
-    ```bash
-    sudo ./udfl-config.sh uninstall
-    ```
-*   **Aktualizacja list (używane przez cron):**
-    ```bash
-    sudo ./udfl-config.sh update
-    ```
+*   **Sprawdzenie statusu:** `sudo ./udfl-config.sh status`
+*   **Włączanie/wyłączanie modułów:** `sudo ./udfl-config.sh enable <moduł>` lub `disable <moduł>`
+*   **Dodawanie/usuwanie wykluczeń:** `sudo ./udfl-config.sh add-exclusion <domena/IP>` lub `remove-exclusion <domena/IP>`
+*   **Pełna deinstalacja:** `sudo ./udfl-config.sh uninstall`
+*   **Tryb Audit:** `sudo ./udfl-config.sh --audit`
 
 ### Plik Wykluczeń (`exclusions.txt`)
 
-Jeśli UDfL zablokuje stronę lub usługę, z której chcesz korzystać, możesz dodać wyjątek. Plik `exclusions.txt` znajduje się w `C:\Projekty\UDfL\kod\`.
+Plik z wykluczeniami znajduje się teraz w `/etc/udfl/exclusions.txt`. Możesz go edytować ręcznie (np. `sudo nano /etc/udfl/exclusions.txt`) lub używać poleceń `add-exclusion`/`remove-exclusion`. Po każdej zmianie należy ponownie zastosować konfigurację modułów, np. przez `sudo ./udfl-config.sh enable hosts`.
 
-1.  Otwórz plik `/etc/udfl/exclusions.txt` (po instalacji) w dowolnym edytorze tekstu (np. `sudo nano /etc/udfl/exclusions.txt`).
-2.  Dodaj domenę lub adres IP, który chcesz odblokować, w nowej linii.
-3.  Linie zaczynające się od `#` są ignorowane.
+### Zaawansowana Konfiguracja
 
-**Przykład:**
-```
-# Odblokuj example.com, ponieważ go potrzebuję
-example.com
-1.2.3.4
-```
-Po zapisaniu zmian, użyj konfiguratora, aby zastosować zmiany: `sudo ./udfl-config.sh enable hosts` (nawet jeśli hosts jest już włączony, to przeładuje listę z nowymi wykluczeniami).
+Możesz modyfikować źródła list blokad, edytując plik `/etc/udfl/config.conf`. Po zmianie adresów URL, uruchom ponownie instalację, aby pobrać dane z nowych źródeł.
